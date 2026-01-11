@@ -187,15 +187,46 @@ if st.button("Run Optimization"):
         for h in range(start, min(start+row["Duration"], 24)):
             hourly_power[h] += row["Avg_kWh"]
 
-    # Highlight bars exceeding MAX_POWER in red
-    colors = ['red' if p>MAX_POWER else 'skyblue' for p in hourly_power]
+# ------------------------------------------------------
+    # 24-Hour Power Load Profile with Tariff Overlay
+    # ------------------------------------------------------
+    st.subheader("24-Hour Load Profile & Tariff Comparison")
 
-    fig, ax = plt.subplots(figsize=(12,4))
-    ax.bar(range(24), hourly_power, color=colors)
-    ax.axhline(MAX_POWER, color='red', linestyle='--', label=f'{MAX_POWER} kW Threshold')
-    ax.set_xticks(range(24))
-    ax.set_xlabel("Hour")
-    ax.set_ylabel("Power (kW)")
-    ax.set_title("24-Hour Household Power Load")
-    ax.legend()
+    # 1. Calculate the Load
+    hourly_power = [0.0] * 24
+    for _, row in non_shiftable.iterrows():
+        for h in range(row["Start_Window"], min(row["Start_Window"]+row["Duration"], 24)):
+            hourly_power[h] += row["Avg_kWh"]
+    for i, start in enumerate(best_solution):
+        row = shiftable.iloc[i]
+        for h in range(start, min(start+row["Duration"], 24)):
+            hourly_power[h] += row["Avg_kWh"]
+
+    # 2. Prepare Tariff Data for Step Plot
+    tariffs = [get_tariff(h) for h in range(24)]
+
+    # 3. Create Figure with Dual Axis
+    fig, ax1 = plt.subplots(figsize=(12, 5))
+
+    # Primary Axis: Power Bar Chart
+    colors = ['red' if p > MAX_POWER else 'skyblue' for p in hourly_power]
+    ax1.bar(range(24), hourly_power, color=colors, alpha=0.7, label="Power Load (kW)")
+    ax1.axhline(MAX_POWER, color='red', linestyle='--', label=f'Limit ({MAX_POWER}kW)')
+    ax1.set_xlabel("Hour of Day (24h)")
+    ax1.set_ylabel("Power Consumption (kW)", color='blue')
+    ax1.set_xticks(range(24))
+
+    # Secondary Axis: Tariff Step Plot
+    ax2 = ax1.twinx()
+    ax2.step(range(24), tariffs, where='post', color='orange', linewidth=2.5, label="Tariff Rate")
+    ax2.set_ylabel("Tariff Rate (RM/kWh)", color='orange')
+    ax2.set_ylim(0, max(tariffs) + 0.2)
+
+    plt.title("Optimized Energy Schedule vs Electricity Price")
+    
+    # Combined Legend
+    lines, labels = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines + lines2, labels + labels2, loc='upper left')
+
     st.pyplot(fig)

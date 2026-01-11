@@ -27,8 +27,8 @@ df = load_data()
 st.subheader("Appliance Dataset")
 st.dataframe(df)
 
-shiftable = df[df["Shiftable"] == 1].reset_index(drop=True)
-non_shiftable = df[df["Shiftable"] == 0].reset_index(drop=True)
+shiftable = df[df["Is_Shiftable"] == 1].reset_index(drop=True)
+non_shiftable = df[df["Is_Shiftable"] == 0].reset_index(drop=True)
 
 # ----------------------------------------------------------
 # 2. Malaysia Peak / Off-Peak Tariff

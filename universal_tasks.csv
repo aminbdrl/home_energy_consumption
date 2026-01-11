@@ -1,0 +1,7 @@
+Appliance,Avg_kWh,Duration,Shiftable,Start_Window,End_Window
+Fridge,0.3,24,0,0,23
+Washing Machine,1.1,2,1,0,23
+Dishwasher,1.1,2,1,0,23
+Air Conditioning,3.5,4,1,9,22
+Lights,1.09,6,0,18,23
+TV,1.1,3,1,10,22

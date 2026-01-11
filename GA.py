@@ -197,11 +197,11 @@ if st.button("Run Optimization"):
     st.subheader("GA Convergence Curve")
 
     fig, ax = plt.subplots()
-    ax.plot(best_history)
+    ax.plot(best_history, color='blue')
     ax.set_xlabel("Generation")
     ax.set_ylabel("Fitness Value")
     ax.set_title("Fitness Convergence")
-    st.pyplot(fig)
+    st.pyplot(fig, clear_figure=True)
 
     # ------------------------------------------------------
     # 11. Hourly Power Consumption Plot
@@ -223,11 +223,12 @@ if st.button("Run Optimization"):
 
     # Plot
     fig2, ax2 = plt.subplots()
-    ax2.bar(range(24), hourly_power, color='skyblue')
+    colors = ['red' if p > MAX_POWER else 'skyblue' for p in hourly_power]  # Highlight above 5 kW
+    ax2.bar(range(24), hourly_power, color=colors)
     ax2.axhline(MAX_POWER, color='red', linestyle='--', label="Peak Power Limit (5 kW)")
     ax2.set_xlabel("Hour of Day")
     ax2.set_ylabel("Power (kW)")
     ax2.set_title("Hourly Household Power Consumption")
     ax2.set_xticks(range(24))
     ax2.legend()
-    st.pyplot(fig2)
+    st.pyplot(fig2, clear_figure=True)

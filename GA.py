@@ -5,6 +5,7 @@
 import streamlit as st
 import pandas as pd
 import random
+import matplotlib.pyplot as plt
 
 # ----------------------------------------------------------
 # 1. Load Dataset
@@ -32,7 +33,7 @@ def get_tariff(hour):
     return TARIFF_PEAK if 8 <= hour < 22 else TARIFF_OFFPEAK
 
 # ----------------------------------------------------------
-# 3. Fixed Cost
+# 3. Fixed Cost (Non-Shiftable Appliances)
 # ----------------------------------------------------------
 fixed_cost = 0
 for _, row in non_shiftable.iterrows():
@@ -40,7 +41,7 @@ for _, row in non_shiftable.iterrows():
     fixed_cost += row["Avg_kWh"] * row["Duration"] * tariff
 
 # ----------------------------------------------------------
-# 4. Preferred Time
+# 4. Preferred Start Time (for Discomfort)
 # ----------------------------------------------------------
 shiftable["Preferred_Time"] = shiftable.apply(
     lambda r: random.randint(r["Start_Window"], r["End_Window"]),
@@ -61,7 +62,7 @@ ALPHA = st.sidebar.slider("Discomfort Weight (α)", 0.1, 2.0, 0.5)
 MAX_POWER = 5.0  # kW
 
 # ----------------------------------------------------------
-# 6. GA Functions
+# 6. Genetic Algorithm Functions
 # ----------------------------------------------------------
 def create_individual():
     return [random.randint(row["Start_Window"], row["End_Window"]) for _, row in shiftable.iterrows()]
@@ -72,22 +73,23 @@ def fitness(individual):
     penalty = 0
     hourly_power = [0.0]*24
 
+    # Non-shiftable appliances
     for _, row in non_shiftable.iterrows():
         for h in range(row["Start_Window"], min(row["Start_Window"]+row["Duration"], 24)):
             hourly_power[h] += row["Avg_kWh"]
 
+    # Shiftable appliances
     for i, start in enumerate(individual):
         row = shiftable.iloc[i]
         if not (row["Start_Window"] <= start <= row["End_Window"]):
             penalty += 200
-
         tariff = get_tariff(start)
         shiftable_cost += row["Avg_kWh"]*row["Duration"]*tariff
         discomfort += abs(start - row["Preferred_Time"])
-
-        for h in range(start, min(start+row["Duration"],24)):
+        for h in range(start, min(start+row["Duration"], 24)):
             hourly_power[h] += row["Avg_kWh"]
 
+    # Peak power constraint
     for power in hourly_power:
         if power > MAX_POWER:
             penalty += (power - MAX_POWER)*300
@@ -115,11 +117,10 @@ def mutate(ind):
 # ----------------------------------------------------------
 if st.button("Run Optimization"):
 
-    # Initialize population
     population = [create_individual() for _ in range(POP_SIZE)]
     best_history = []
 
-    # GA iterations
+    # GA loop
     for _ in range(GENERATIONS):
         new_population = []
         for _ in range(POP_SIZE//2):
@@ -167,31 +168,34 @@ if st.button("Run Optimization"):
     st.metric("Cost Savings (RM)", f"{baseline_cost-total_optimized_cost:.2f}")
 
     # ------------------------------------------------------
-    # GA Convergence Plot
+    # GA Convergence Curve
     # ------------------------------------------------------
     st.subheader("GA Convergence Curve")
-    ga_series = pd.Series(best_history)
-    st.line_chart(ga_series)
+    st.line_chart(pd.Series(best_history))
 
     # ------------------------------------------------------
-    # Hourly Power Consumption Plot
+    # 24-Hour Power Load Chart
     # ------------------------------------------------------
-    st.subheader("Hourly Power Consumption (kW)")
+    st.subheader("24-Hour Power Load Profile")
 
     hourly_power = [0.0]*24
     for _, row in non_shiftable.iterrows():
         for h in range(row["Start_Window"], min(row["Start_Window"]+row["Duration"], 24)):
             hourly_power[h] += row["Avg_kWh"]
-
     for i, start in enumerate(best_solution):
         row = shiftable.iloc[i]
         for h in range(start, min(start+row["Duration"], 24)):
             hourly_power[h] += row["Avg_kWh"]
 
-    # Convert to Pandas Series for Streamlit
-    hourly_series = pd.Series(hourly_power, index=[f"{h}:00" for h in range(24)])
-    st.bar_chart(hourly_series)
+    # Highlight bars exceeding MAX_POWER in red
+    colors = ['red' if p>MAX_POWER else 'skyblue' for p in hourly_power]
 
-    # Optional: show peak power reference line
-    st.markdown(f"**Red line reference**: Peak power limit = {MAX_POWER} kW")
-    st.line_chart(pd.Series([MAX_POWER]*24, index=hourly_series.index))
+    fig, ax = plt.subplots(figsize=(12,4))
+    ax.bar(range(24), hourly_power, color=colors)
+    ax.axhline(MAX_POWER, color='red', linestyle='--', label=f'{MAX_POWER} kW Threshold')
+    ax.set_xticks(range(24))
+    ax.set_xlabel("Hour")
+    ax.set_ylabel("Power (kW)")
+    ax.set_title("24-Hour Household Power Load")
+    ax.legend()
+    st.pyplot(fig)

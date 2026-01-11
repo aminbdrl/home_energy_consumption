@@ -11,7 +11,7 @@ st.set_page_config(page_title="Smart Home Energy Scheduling", layout="wide")
 st.title("Smart Home Energy Scheduling using Genetic Algorithm")
 
 # ==========================================================
-# Session State (FIXES CRASH)
+# Session State (prevents crash before GA runs)
 # ==========================================================
 if "best_solution" not in st.session_state:
     st.session_state.best_solution = None
@@ -62,7 +62,7 @@ def get_tariff(hour):
     return TARIFF_PEAK if 8 <= hour < 22 else TARIFF_OFFPEAK
 
 # ==========================================================
-# 3. Fixed Cost (Non-shiftable)
+# 3. Fixed Cost (Non-shiftable appliances)
 # ==========================================================
 def calculate_fixed_cost():
     cost = 0
@@ -74,7 +74,7 @@ def calculate_fixed_cost():
 fixed_cost = calculate_fixed_cost()
 
 # ==========================================================
-# 4. GA Parameters
+# 4. GA Parameters (Sidebar)
 # ==========================================================
 st.sidebar.header("Genetic Algorithm Parameters")
 
@@ -84,7 +84,7 @@ CROSSOVER_RATE = st.sidebar.slider("Crossover Rate", 0.1, 0.95, 0.8)
 MUTATION_RATE = st.sidebar.slider("Mutation Rate", 0.01, 0.5, 0.15)
 ALPHA = st.sidebar.slider("Discomfort Weight (α)", 0.0, 5.0, 0.5)
 
-MAX_POWER = 5.0  # kW limit
+MAX_POWER = 5.0  # kW peak constraint
 
 # ==========================================================
 # 5. Genetic Algorithm Functions
@@ -101,7 +101,7 @@ def fitness(individual):
     penalty = 0
     hourly_power = [0.0] * 24
 
-    # Non-shiftable load
+    # Non-shiftable appliances
     for _, row in non_shiftable.iterrows():
         for h in range(row["Preferred_Time"], row["Preferred_Time"] + row["Duration"]):
             hourly_power[h % 24] += row["Avg_kWh"]
@@ -116,7 +116,7 @@ def fitness(individual):
             hourly_power[hour] += row["Avg_kWh"]
             shiftable_cost += row["Avg_kWh"] * get_tariff(hour)
 
-    # Peak power constraint
+    # Peak power penalty
     for p in hourly_power:
         if p > MAX_POWER:
             penalty += (p - MAX_POWER) * 500  # strong penalty
@@ -156,18 +156,18 @@ if st.button("Run Optimization"):
     progress = st.progress(0)
 
     for g in range(GENERATIONS):
-        new_pop = []
+        new_population = []
         for _ in range(POP_SIZE // 2):
             p1, p2 = selection(population), selection(population)
             c1, c2 = crossover(p1, p2)
-            new_pop.extend([mutate(c1), mutate(c2)])
-        population = new_pop
+            new_population.extend([mutate(c1), mutate(c2)])
+        population = new_population
         progress.progress((g + 1) / GENERATIONS)
 
     st.session_state.best_solution = min(population, key=fitness)
 
 # ==========================================================
-# 7. Results & Visualization
+# 7. Results & Power Chart
 # ==========================================================
 if st.session_state.best_solution is not None:
 
@@ -179,9 +179,9 @@ if st.session_state.best_solution is not None:
         rows.append({
             "Appliance": r["Appliance"],
             "Type": "Non-Shiftable",
-            "Preferred": r["Preferred_Time"],
-            "Scheduled": r["Preferred_Time"],
-            "Duration": r["Duration"],
+            "Preferred Start": r["Preferred_Time"],
+            "Scheduled Start": r["Preferred_Time"],
+            "Duration (h)": r["Duration"],
             "Power (kW)": r["Avg_kWh"]
         })
 
@@ -190,16 +190,16 @@ if st.session_state.best_solution is not None:
         rows.append({
             "Appliance": r["Appliance"],
             "Type": "Shiftable",
-            "Preferred": r["Preferred_Time"],
-            "Scheduled": start,
-            "Duration": r["Duration"],
+            "Preferred Start": r["Preferred_Time"],
+            "Scheduled Start": start,
+            "Duration (h)": r["Duration"],
             "Power (kW)": r["Avg_kWh"]
         })
 
     st.dataframe(pd.DataFrame(rows))
 
     # ------------------------------------------------------
-    # Cost Metrics
+    # Cost Comparison
     # ------------------------------------------------------
     baseline_solution = [r["Preferred_Time"] for _, r in shiftable.iterrows()]
     baseline_cost = calculate_total_cost(baseline_solution)
@@ -211,7 +211,7 @@ if st.session_state.best_solution is not None:
     c3.metric("Savings (RM)", f"{baseline_cost - optimized_cost:.2f}")
 
     # ------------------------------------------------------
-    # Hourly Power Consumption Plot (Constraint Validation)
+    # Hourly Power Consumption Chart (kW)
     # ------------------------------------------------------
     st.subheader("Hourly Power Consumption (kW)")
 
@@ -226,9 +226,9 @@ if st.session_state.best_solution is not None:
         for h in range(start, start + row["Duration"]):
             hourly_power[h % 24] += row["Avg_kWh"]
 
-    fig, ax = plt.subplots()
-    ax.plot(range(24), hourly_power, marker="o", label="Total Power (kW)")
-    ax.axhline(MAX_POWER, linestyle="--", label="5.0 kW Limit")
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.plot(range(24), hourly_power, marker="o", linewidth=2, label="Total Power (kW)")
+    ax.axhline(MAX_POWER, color="red", linestyle="--", linewidth=2, label="5.0 kW Limit")
 
     ax.set_xlabel("Hour of Day")
     ax.set_ylabel("Power (kW)")
@@ -237,3 +237,8 @@ if st.session_state.best_solution is not None:
     ax.grid(True)
 
     st.pyplot(fig)
+
+    if max(hourly_power) <= MAX_POWER:
+        st.success("✅ Peak power constraint satisfied (≤ 5.0 kW)")
+    else:
+        st.error("❌ Peak power constraint violated")

@@ -8,11 +8,14 @@
 # - Shiftable appliances within time window
 # - Peak Power Limit = 5.0 kW
 # ==========================================================
-
 import streamlit as st
 import pandas as pd
 import random
+import matplotlib
 import matplotlib.pyplot as plt
+
+# Use a non-interactive backend for Streamlit
+matplotlib.use("Agg")
 
 # ----------------------------------------------------------
 # 1. Load Dataset
@@ -40,7 +43,7 @@ def get_tariff(hour):
     return TARIFF_PEAK if 8 <= hour < 22 else TARIFF_OFFPEAK
 
 # ----------------------------------------------------------
-# 3. Fixed Cost (Non-Shiftable Appliances)
+# 3. Fixed Cost
 # ----------------------------------------------------------
 fixed_cost = 0
 for _, row in non_shiftable.iterrows():
@@ -48,7 +51,7 @@ for _, row in non_shiftable.iterrows():
     fixed_cost += row["Avg_kWh"] * row["Duration"] * tariff
 
 # ----------------------------------------------------------
-# 4. Preferred Start Time (for Discomfort)
+# 4. Preferred Time
 # ----------------------------------------------------------
 shiftable["Preferred_Time"] = shiftable.apply(
     lambda r: random.randint(r["Start_Window"], r["End_Window"]),
@@ -69,7 +72,7 @@ ALPHA = st.sidebar.slider("Discomfort Weight (α)", 0.1, 2.0, 0.5)
 MAX_POWER = 5.0  # kW
 
 # ----------------------------------------------------------
-# 6. Genetic Algorithm Functions
+# 6. GA Functions
 # ----------------------------------------------------------
 def create_individual():
     return [
@@ -77,11 +80,10 @@ def create_individual():
         for _, row in shiftable.iterrows()
     ]
 
-def fitness(individual):
+def fitness(ind):
     shiftable_cost = 0
     discomfort = 0
     penalty = 0
-
     hourly_power = [0.0] * 24
 
     # Non-shiftable appliances
@@ -90,7 +92,7 @@ def fitness(individual):
             hourly_power[h] += row["Avg_kWh"]
 
     # Shiftable appliances
-    for i, start in enumerate(individual):
+    for i, start in enumerate(ind):
         row = shiftable.iloc[i]
 
         if not (row["Start_Window"] <= start <= row["End_Window"]):
@@ -154,7 +156,7 @@ if st.button("Run Optimization"):
     best_solution = min(population, key=fitness)
 
     # ------------------------------------------------------
-    # 8. Results Table
+    # Results Table
     # ------------------------------------------------------
     st.subheader("Optimized Appliance Schedule")
 
@@ -180,9 +182,7 @@ if st.button("Run Optimization"):
 
     total_optimized_cost = fixed_cost + optimized_shiftable_cost
 
-    # ------------------------------------------------------
-    # 9. Cost Comparison
-    # ------------------------------------------------------
+    # Cost Comparison
     baseline_cost = fixed_cost
     for _, row in shiftable.iterrows():
         baseline_cost += row["Avg_kWh"] * row["Duration"] * get_tariff(row["Start_Window"])
@@ -191,39 +191,31 @@ if st.button("Run Optimization"):
     st.metric("Optimized Cost (RM)", f"{total_optimized_cost:.2f}")
     st.metric("Cost Savings (RM)", f"{baseline_cost - total_optimized_cost:.2f}")
 
-    # ------------------------------------------------------
-    # 10. GA Convergence Plot
-    # ------------------------------------------------------
+    # GA Convergence
     st.subheader("GA Convergence Curve")
-
     fig, ax = plt.subplots()
     ax.plot(best_history, color='blue')
     ax.set_xlabel("Generation")
     ax.set_ylabel("Fitness Value")
     ax.set_title("Fitness Convergence")
-    st.pyplot(fig, clear_figure=True)
+    st.pyplot(fig)
+    plt.close(fig)
 
-    # ------------------------------------------------------
-    # 11. Hourly Power Consumption Plot
-    # ------------------------------------------------------
+    # Hourly Power Consumption
     st.subheader("Hourly Power Consumption (kW)")
-
     hourly_power = [0.0] * 24
 
-    # Add non-shiftable appliances
     for _, row in non_shiftable.iterrows():
         for h in range(row["Start_Window"], min(row["Start_Window"] + row["Duration"], 24)):
             hourly_power[h] += row["Avg_kWh"]
 
-    # Add optimized shiftable appliances
     for i, start in enumerate(best_solution):
         row = shiftable.iloc[i]
         for h in range(start, min(start + row["Duration"], 24)):
             hourly_power[h] += row["Avg_kWh"]
 
-    # Plot
     fig2, ax2 = plt.subplots()
-    colors = ['red' if p > MAX_POWER else 'skyblue' for p in hourly_power]  # Highlight above 5 kW
+    colors = ['red' if p > MAX_POWER else 'skyblue' for p in hourly_power]
     ax2.bar(range(24), hourly_power, color=colors)
     ax2.axhline(MAX_POWER, color='red', linestyle='--', label="Peak Power Limit (5 kW)")
     ax2.set_xlabel("Hour of Day")
@@ -231,4 +223,5 @@ if st.button("Run Optimization"):
     ax2.set_title("Hourly Household Power Consumption")
     ax2.set_xticks(range(24))
     ax2.legend()
-    st.pyplot(fig2, clear_figure=True)
+    st.pyplot(fig2)
+    plt.close(fig2)

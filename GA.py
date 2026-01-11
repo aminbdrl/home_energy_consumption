@@ -192,7 +192,7 @@ if st.button("Run Optimization"):
     st.metric("Cost Savings (RM)", f"{baseline_cost - total_optimized_cost:.2f}")
 
     # ------------------------------------------------------
-    # 10. Convergence Plot
+    # 10. GA Convergence Plot
     # ------------------------------------------------------
     st.subheader("GA Convergence Curve")
 
@@ -203,37 +203,31 @@ if st.button("Run Optimization"):
     ax.set_title("Fitness Convergence")
     st.pyplot(fig)
 
-# ------------------------------------------------------
-# 11. Hourly Power Consumption Plot
-# ------------------------------------------------------
-st.subheader("Hourly Power Consumption (kW)")
+    # ------------------------------------------------------
+    # 11. Hourly Power Consumption Plot
+    # ------------------------------------------------------
+    st.subheader("Hourly Power Consumption (kW)")
 
-# Initialize hourly power for 24 hours
-hourly_power = [0.0] * 24
+    hourly_power = [0.0] * 24
 
-# Add non-shiftable appliances
-for _, row in non_shiftable.iterrows():
-    for h in range(row["Start_Window"], min(row["Start_Window"] + row["Duration"], 24)):
-        hourly_power[h] += row["Avg_kWh"]
+    # Add non-shiftable appliances
+    for _, row in non_shiftable.iterrows():
+        for h in range(row["Start_Window"], min(row["Start_Window"] + row["Duration"], 24)):
+            hourly_power[h] += row["Avg_kWh"]
 
-# Add optimized shiftable appliances
-for i, start in enumerate(best_solution):
-    row = shiftable.iloc[i]
-    for h in range(start, min(start + row["Duration"], 24)):
-        hourly_power[h] += row["Avg_kWh"]
+    # Add optimized shiftable appliances
+    for i, start in enumerate(best_solution):
+        row = shiftable.iloc[i]
+        for h in range(start, min(start + row["Duration"], 24)):
+            hourly_power[h] += row["Avg_kWh"]
 
-# Plot
-fig2, ax2 = plt.subplots()
-ax2.bar(range(24), hourly_power, color='skyblue')
-ax2.axhline(MAX_POWER, color='red', linestyle='--', label="Peak Power Limit (5 kW)")
-ax2.set_xlabel("Hour of Day")
-ax2.set_ylabel("Power (kW)")
-ax2.set_title("Hourly Household Power Consumption")
-ax2.set_xticks(range(24))
-ax2.legend()
-st.pyplot(fig2)
-
-
-# ----------------------------------------------------------
-# End of Application
-# ----------------------------------------------------------
+    # Plot
+    fig2, ax2 = plt.subplots()
+    ax2.bar(range(24), hourly_power, color='skyblue')
+    ax2.axhline(MAX_POWER, color='red', linestyle='--', label="Peak Power Limit (5 kW)")
+    ax2.set_xlabel("Hour of Day")
+    ax2.set_ylabel("Power (kW)")
+    ax2.set_title("Hourly Household Power Consumption")
+    ax2.set_xticks(range(24))
+    ax2.legend()
+    st.pyplot(fig2)

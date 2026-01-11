@@ -168,17 +168,16 @@ st.dataframe(result_df)
 
 st.metric("Total Optimized Cost (RM)", f"{best_value:.2f}")
 
-
-    # ----------------------------------------------------------
-    # 8. Convergence Plot
-    # ----------------------------------------------------------
-    st.subheader("GA Convergence Curve")
-    fig, ax = plt.subplots()
-    ax.plot(best_fitness_history)
-    ax.set_xlabel("Generation")
-    ax.set_ylabel("Fitness Value")
-    ax.set_title("Fitness Convergence")
-    st.pyplot(fig)
+# ----------------------------------------------------------
+# 8. Convergence Plot
+# ----------------------------------------------------------
+st.subheader("GA Convergence Curve")
+fig, ax = plt.subplots()
+ax.plot(best_fitness_history)
+ax.set_xlabel("Generation")
+ax.set_ylabel("Fitness Value")
+ax.set_title("Fitness Convergence")
+st.pyplot(fig)
 
 # ----------------------------------------------------------
 # End of Application

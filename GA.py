@@ -15,7 +15,7 @@ st.markdown("""
 1.  **Minimize Cost**: Malaysian ToU Tariff (Peak: RM 0.50 [08:00-22:00], Off-Peak: RM 0.30).
 2.  **Minimize Discomfort**: Difference between Preferred and Scheduled start times.
 3.  **Peak Power Constraint**: Total consumption must stay **below 5.0 kW** at any given hour.
-4.  **Shiftable vs Non-Shiftable**: Appliances marked `FALSE` stay fixed; `TRUE` can be shifted.
+4.  **Shiftable vs Contrains**: Appliances marked `FALSE` stay fixed; `TRUE` can be shifted.
 """)
 
 # ----------------------------------------------------------

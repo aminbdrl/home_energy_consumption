@@ -138,21 +138,36 @@ if st.button("Run Optimization"):
     best_solution = min(population, key=fitness)
     best_value = fitness(best_solution)
 
-    # ----------------------------------------------------------
-    # 7. Display Results
-    # ----------------------------------------------------------
-    st.subheader("Optimized Appliance Schedule")
+# ----------------------------------------------------------
+# 7. Display Results (WITH END TIME)
+# ----------------------------------------------------------
+st.subheader("Optimized Appliance Schedule")
 
-    result = []
-    for i, start in enumerate(best_solution):
-        result.append({
-            "Appliance": shiftable.iloc[i]["Appliance"],
-            "Scheduled Start Time (Hour)": start
-        })
+result = []
 
-    st.dataframe(pd.DataFrame(result))
+for i, start in enumerate(best_solution):
+    row = shiftable.iloc[i]
+    duration = row["Duration"]
+    end_time = start + duration
 
-    st.metric("Total Optimized Cost (RM)", f"{best_value:.2f}")
+    # Ensure schedule does not exceed 24 hours
+    end_time = min(end_time, 24)
+
+    result.append({
+        "Appliance": row["Appliance"],
+        "Start Window": row["Start_Window"],
+        "End Window": row["End_Window"],
+        "Scheduled Start Time (Hour)": start,
+        "Scheduled End Time (Hour)": end_time,
+        "Duration (Hour)": duration,
+        "Avg Power (kWh)": row["Avg_kWh"]
+    })
+
+result_df = pd.DataFrame(result)
+st.dataframe(result_df)
+
+st.metric("Total Optimized Cost (RM)", f"{best_value:.2f}")
+
 
     # ----------------------------------------------------------
     # 8. Convergence Plot

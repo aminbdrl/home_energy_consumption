@@ -208,4 +208,4 @@ if st.button("Run Optimization"):
 # ----------------------------------------------------------
 
 
-add a graph that show power (kW) below 5 kW
+

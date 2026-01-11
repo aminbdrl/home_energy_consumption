@@ -7,7 +7,7 @@ import random
 # Load dataset
 @st.cache_data
 def load_data():
-    return pd.read_csv("smart_home_energy.csv")
+    return pd.read_csv("universal_tasks.csv")
 
 data = load_data()
 

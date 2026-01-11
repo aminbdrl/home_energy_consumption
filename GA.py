@@ -1,190 +1,217 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import random
+import numpy as np
+import matplotlib.pyplot as plt
 
 # ----------------------------------------------------------
-# Page Configuration
+# Page Setup
 # ----------------------------------------------------------
-st.set_page_config(page_title="Smart Home Energy GA", layout="wide")
-st.title("⚡ Smart Home Energy Scheduling Optimization (Optimized)")
-
-st.markdown("""
-### ✅ Project Objectives & Constraints
-* **Objective 1 (Cost):** Minimize RM using Daily Malaysia ToU Tariff (Peak: 08:00-22:00 @ RM0.50)
-* **Objective 2 (Discomfort):** Minimize the time shift from user preferred hours
-* **Constraint 1 (Fixed):** Fridge, TV, Lights, etc., stay at original times
-* **Constraint 2 (Power):** **CRUCIAL - Total power must not exceed 5.0 kW at any hour**
-""")
+st.set_page_config(page_title="Smart Home Energy Scheduling", layout="wide")
+st.title("Smart Home Energy Scheduling using Genetic Algorithm")
 
 # ----------------------------------------------------------
-# 1. Load Dataset
+# 1. Load & Preprocess Dataset
 # ----------------------------------------------------------
 @st.cache_data
 def load_data():
-    df = pd.read_csv("project_benchmark_data.csv")
-    df['Shiftable'] = df['Is_Shiftable'].astype(bool)
-    df['Power_kW'] = df['Avg_Power_kW']
-    df['Duration'] = df['Duration_Hours']
-    df['Preferred'] = df['Preferred_Start_Hour']
-    return df
+    data = pd.read_csv("project_benchmark_data.csv")
+
+    data["Shiftable"] = data["Is_Shiftable"].astype(int)
+    data["Avg_kWh"] = data["Avg_Power_kW"]
+    data["Duration"] = data["Duration_Hours"]
+    data["Preferred_Time"] = data["Preferred_Start_Hour"]
+
+    # Realistic flexibility: ±3 hours
+    WINDOW = 3
+    data["Start_Window"] = data.apply(
+        lambda r: max(0, r["Preferred_Time"] - WINDOW) if r["Shiftable"] else r["Preferred_Time"],
+        axis=1
+    )
+    data["End_Window"] = data.apply(
+        lambda r: min(23, r["Preferred_Time"] + WINDOW) if r["Shiftable"] else r["Preferred_Time"],
+        axis=1
+    )
+
+    return data
 
 df = load_data()
-shiftable_apps = df[df['Shiftable']].reset_index(drop=True)
-fixed_apps = df[~df['Shiftable']].reset_index(drop=True)
+st.subheader("Appliance Dataset")
+st.dataframe(df[[
+    "Appliance", "Avg_kWh", "Preferred_Time",
+    "Duration", "Shiftable"
+]])
+
+shiftable = df[df["Shiftable"] == 1].reset_index(drop=True)
+non_shiftable = df[df["Shiftable"] == 0].reset_index(drop=True)
 
 # ----------------------------------------------------------
-# 2. Tariff & Parameters
+# 2. Malaysia Time-of-Use Tariff
 # ----------------------------------------------------------
-st.sidebar.header("GA Settings")
-pop_size = st.sidebar.slider("Population Size", 30, 150, 50)
-generations = st.sidebar.slider("Generations", 50, 500, 200)
-alpha = st.sidebar.slider("Discomfort Weight (α)", 0.0, 2.0, 0.5)
-
-MAX_POWER_LIMIT = 5.0 
 TARIFF_PEAK = 0.50
 TARIFF_OFFPEAK = 0.30
 
-# Precompute tariffs for all 24 hours
-tariff_array = np.array([TARIFF_PEAK if 8 <= h < 22 else TARIFF_OFFPEAK for h in range(24)])
+def get_tariff(hour):
+    return TARIFF_PEAK if 8 <= hour < 22 else TARIFF_OFFPEAK
 
 # ----------------------------------------------------------
-# 3. Fitness Function (Vectorized)
+# 3. Fixed Cost (Non-shiftable)
 # ----------------------------------------------------------
+def calculate_fixed_cost():
+    cost = 0
+    for _, row in non_shiftable.iterrows():
+        for h in range(row["Preferred_Time"], row["Preferred_Time"] + row["Duration"]):
+            cost += row["Avg_kWh"] * get_tariff(h % 24)
+    return cost
+
+fixed_cost = calculate_fixed_cost()
+
+# ----------------------------------------------------------
+# 4. GA Parameters
+# ----------------------------------------------------------
+st.sidebar.header("Genetic Algorithm Parameters")
+
+POP_SIZE = st.sidebar.slider("Population Size", 10, 100, 40)
+GENERATIONS = st.sidebar.slider("Generations", 50, 400, 200)
+CROSSOVER_RATE = st.sidebar.slider("Crossover Rate", 0.1, 0.95, 0.8)
+MUTATION_RATE = st.sidebar.slider("Mutation Rate", 0.01, 0.5, 0.15)
+ALPHA = st.sidebar.slider("Discomfort Weight (α)", 0.0, 5.0, 0.5)
+
+MAX_POWER = 5.0  # kW
+
+# ----------------------------------------------------------
+# 5. GA Core Functions
+# ----------------------------------------------------------
+def create_individual():
+    return [
+        random.randint(row["Start_Window"], row["End_Window"])
+        for _, row in shiftable.iterrows()
+    ]
+
 def fitness(individual):
-    total_discomfort = 0
-    hourly_power = np.zeros(24)
+    shiftable_cost = 0
+    discomfort = 0
+    penalty = 0
+    hourly_power = [0.0] * 24
 
-    # Fixed appliances
-    for _, r in fixed_apps.iterrows():
-        hours = np.arange(r['Preferred'], r['Preferred'] + r['Duration']) % 24
-        hourly_power[hours] += r['Power_kW']
+    # Non-shiftable load
+    for _, row in non_shiftable.iterrows():
+        for h in range(row["Preferred_Time"], row["Preferred_Time"] + row["Duration"]):
+            hourly_power[h % 24] += row["Avg_kWh"]
 
     # Shiftable appliances
     for i, start in enumerate(individual):
-        r = shiftable_apps.iloc[i]
-        total_discomfort += abs(start - r['Preferred'])
-        hours = np.arange(start, start + r['Duration']) % 24
-        hourly_power[hours] += r['Power_kW']
+        row = shiftable.iloc[i]
 
-    # Cost
-    total_cost = np.sum(hourly_power * tariff_array)
+        discomfort += abs(start - row["Preferred_Time"])
 
-    # Penalty for exceeding max power
-    peak_penalty = np.sum(np.clip(hourly_power - MAX_POWER_LIMIT, 0, None)) * 10000
+        for h in range(start, start + row["Duration"]):
+            hour = h % 24
+            hourly_power[hour] += row["Avg_kWh"]
+            shiftable_cost += row["Avg_kWh"] * get_tariff(hour)
 
-    return total_cost + (alpha * total_discomfort) + peak_penalty
+    # Peak power constraint
+    for p in hourly_power:
+        if p > MAX_POWER:
+            penalty += (p - MAX_POWER) * 300
+
+    return shiftable_cost + ALPHA * discomfort + penalty
+
+def calculate_total_cost(solution):
+    cost = fixed_cost
+    for i, start in enumerate(solution):
+        row = shiftable.iloc[i]
+        for h in range(start, start + row["Duration"]):
+            cost += row["Avg_kWh"] * get_tariff(h % 24)
+    return cost
+
+def selection(pop):
+    return min(random.sample(pop, 3), key=fitness)
+
+def crossover(p1, p2):
+    if random.random() < CROSSOVER_RATE and len(p1) > 1:
+        pt = random.randint(1, len(p1) - 1)
+        return p1[:pt] + p2[pt:], p2[:pt] + p1[pt:]
+    return p1, p2
+
+def mutate(ind):
+    for i in range(len(ind)):
+        if random.random() < MUTATION_RATE:
+            row = shiftable.iloc[i]
+            ind[i] = random.randint(row["Start_Window"], row["End_Window"])
+    return ind
 
 # ----------------------------------------------------------
-# 4. Genetic Algorithm (Optimized)
+# 6. Run Optimization
 # ----------------------------------------------------------
-def solve():
-    # Initialize population randomly
-    population = [np.random.randint(0, 24, size=len(shiftable_apps)).tolist() for _ in range(pop_size)]
+if st.button("Run Optimization"):
+
+    population = [create_individual() for _ in range(POP_SIZE)]
     best_history = []
-
     progress = st.progress(0)
-    for gen in range(generations):
-        # Compute fitness once per individual
-        fitness_scores = [fitness(ind) for ind in population]
 
-        # Store best
-        best_idx = np.argmin(fitness_scores)
-        best_history.append(fitness_scores[best_idx])
+    for g in range(GENERATIONS):
+        new_pop = []
+        for _ in range(POP_SIZE // 2):
+            p1, p2 = selection(population), selection(population)
+            c1, c2 = crossover(p1, p2)
+            new_pop.extend([mutate(c1), mutate(c2)])
+        population = new_pop
+        best_history.append(fitness(min(population, key=fitness)))
+        progress.progress((g + 1) / GENERATIONS)
 
-        # Selection (tournament)
-        new_population = [population[best_idx]]  # Elitism: keep best
+    best_solution = min(population, key=fitness)
 
-        while len(new_population) < pop_size:
-            contenders = random.sample(range(pop_size), 5)
-            p1 = population[min(contenders, key=lambda i: fitness_scores[i])]
-            contenders = random.sample(range(pop_size), 5)
-            p2 = population[min(contenders, key=lambda i: fitness_scores[i])]
+    # ------------------------------------------------------
+    # 7. Results Table
+    # ------------------------------------------------------
+    st.subheader("Optimized Appliance Schedule")
 
-            # Single-point crossover
-            pt = random.randint(1, len(p1)-1) if len(p1) > 1 else 0
-            child = p1[:pt] + p2[pt:]
+    rows = []
 
-            # Mutation
-            if random.random() < 0.15:
-                idx = random.randint(0, len(child)-1)
-                child[idx] = random.randint(0, 23)
+    for _, r in non_shiftable.iterrows():
+        rows.append({
+            "Appliance": r["Appliance"],
+            "Type": "Non-Shiftable",
+            "Preferred": r["Preferred_Time"],
+            "Scheduled": r["Preferred_Time"],
+            "Duration": r["Duration"],
+            "Power (kW)": r["Avg_kWh"]
+        })
 
-            new_population.append(child)
+    for i, start in enumerate(best_solution):
+        r = shiftable.iloc[i]
+        rows.append({
+            "Appliance": r["Appliance"],
+            "Type": "Shiftable",
+            "Preferred": r["Preferred_Time"],
+            "Scheduled": start,
+            "Duration": r["Duration"],
+            "Power (kW)": r["Avg_kWh"]
+        })
 
-        population = new_population
-        if gen % 10 == 0:  # Update progress every 10 gens
-            progress.progress((gen + 1) / generations)
+    st.dataframe(pd.DataFrame(rows))
 
-    # Return best individual
-    fitness_scores = [fitness(ind) for ind in population]
-    best_idx = np.argmin(fitness_scores)
-    return population[best_idx], best_history
+    # ------------------------------------------------------
+    # 8. Cost Metrics
+    # ------------------------------------------------------
+    baseline_solution = [r["Preferred_Time"] for _, r in shiftable.iterrows()]
 
-# ----------------------------------------------------------
-# 5. Run Optimization
-# ----------------------------------------------------------
-if st.button("🚀 Calculate Optimized Schedule"):
-    best_ind, hist = solve()
+    baseline_cost = calculate_total_cost(baseline_solution)
+    optimized_cost = calculate_total_cost(best_solution)
 
-    # Compute final hourly load
-    final_load = np.zeros(24)
-    for _, r in fixed_apps.iterrows():
-        hours = np.arange(r['Preferred'], r['Preferred'] + r['Duration']) % 24
-        final_load[hours] += r['Power_kW']
-    for i, start in enumerate(best_ind):
-        r = shiftable_apps.iloc[i]
-        hours = np.arange(start, start + r['Duration']) % 24
-        final_load[hours] += r['Power_kW']
-
-    # Daily cost
-    daily_optimized = np.sum(final_load * tariff_array)
-    baseline_load = np.zeros(24)
-    for _, r in df.iterrows():
-        hours = np.arange(r['Preferred'], r['Preferred'] + r['Duration']) % 24
-        baseline_load[hours] += r['Power_kW']
-    daily_baseline = np.sum(baseline_load * tariff_array)
-
-    # Metrics
-    st.subheader("Financial Impact (Daily)")
     c1, c2, c3 = st.columns(3)
-    c1.metric("Baseline Cost", f"RM {daily_baseline:.2f}")
-    c2.metric("Optimized Cost", f"RM {daily_optimized:.2f}")
-    c3.metric("Daily Savings", f"RM {daily_baseline - daily_optimized:.2f}")
+    c1.metric("Baseline Cost (RM)", f"{baseline_cost:.2f}")
+    c2.metric("Optimized Cost (RM)", f"{optimized_cost:.2f}")
+    c3.metric("Savings (RM)", f"{baseline_cost - optimized_cost:.2f}")
 
-    # Power chart (faster)
-    st.write("**24-Hour Power Load Profile**")
-    st.bar_chart(final_load)
+    # ------------------------------------------------------
+    # 9. Convergence Plot
+    # ------------------------------------------------------
+    st.subheader("GA Convergence Curve")
 
-    # Schedule Table
-    st.subheader("Final Optimized Schedule Table")
-    final_res = []
-
-    for _, r in fixed_apps.iterrows():
-        final_res.append({
-            "Appliance": r['Appliance'], 
-            "Type": "Non-Shiftable", 
-            "Average Power (kW)": r['Power_kW'],
-            "Start Time": f"{r['Preferred']}:00", 
-            "Duration (h)": r['Duration'],
-            "End Time": f"{(r['Preferred'] + r['Duration'])%24}:00"
-        })
-    for i, start in enumerate(best_ind):
-        r = shiftable_apps.iloc[i]
-        final_res.append({
-            "Appliance": r['Appliance'], 
-            "Type": "Shiftable", 
-            "Average Power (kW)": r['Power_kW'],
-            "Start Time": f"{start}:00", 
-            "Duration (h)": r['Duration'],
-            "End Time": f"{(start + r['Duration'])%24}:00"
-        })
-
-    st.table(pd.DataFrame(final_res))
-
-    # Peak check
-    max_load = np.max(final_load)
-    if max_load > MAX_POWER_LIMIT:
-        st.error(f"⚠️ Limit Exceeded: {max_load:.2f} kW. Increase generations to find valid slots.")
-    else:
-        st.success(f"✅ Peak Power kept under {MAX_POWER_LIMIT} kW! (Max: {max_load:.2f} kW)")
+    fig, ax = plt.subplots()
+    ax.plot(best_history)
+    ax.set_xlabel("Generation")
+    ax.set_ylabel("Fitness Value")
+    st.pyplot(fig)

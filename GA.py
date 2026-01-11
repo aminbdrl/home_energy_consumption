@@ -80,4 +80,160 @@ st.sidebar.header("Genetic Algorithm Parameters")
 
 POP_SIZE = st.sidebar.slider("Population Size", 10, 100, 40)
 GENERATIONS = st.sidebar.slider("Generations", 50, 400, 200)
-CROS
+CROSSOVER_RATE = st.sidebar.slider("Crossover Rate", 0.1, 0.95, 0.8)
+MUTATION_RATE = st.sidebar.slider("Mutation Rate", 0.01, 0.5, 0.15)
+ALPHA = st.sidebar.slider("Discomfort Weight (α)", 0.0, 5.0, 0.5)
+
+MAX_POWER = 5.0  # kW limit
+
+# ==========================================================
+# 5. Genetic Algorithm Functions
+# ==========================================================
+def create_individual():
+    return [
+        random.randint(row["Start_Window"], row["End_Window"])
+        for _, row in shiftable.iterrows()
+    ]
+
+def fitness(individual):
+    shiftable_cost = 0
+    discomfort = 0
+    penalty = 0
+    hourly_power = [0.0] * 24
+
+    # Non-shiftable load
+    for _, row in non_shiftable.iterrows():
+        for h in range(row["Preferred_Time"], row["Preferred_Time"] + row["Duration"]):
+            hourly_power[h % 24] += row["Avg_kWh"]
+
+    # Shiftable appliances
+    for i, start in enumerate(individual):
+        row = shiftable.iloc[i]
+        discomfort += abs(start - row["Preferred_Time"])
+
+        for h in range(start, start + row["Duration"]):
+            hour = h % 24
+            hourly_power[hour] += row["Avg_kWh"]
+            shiftable_cost += row["Avg_kWh"] * get_tariff(hour)
+
+    # Peak power constraint
+    for p in hourly_power:
+        if p > MAX_POWER:
+            penalty += (p - MAX_POWER) * 500  # strong penalty
+
+    return shiftable_cost + ALPHA * discomfort + penalty
+
+def calculate_total_cost(solution):
+    cost = fixed_cost
+    for i, start in enumerate(solution):
+        row = shiftable.iloc[i]
+        for h in range(start, start + row["Duration"]):
+            cost += row["Avg_kWh"] * get_tariff(h % 24)
+    return cost
+
+def selection(pop):
+    return min(random.sample(pop, 3), key=fitness)
+
+def crossover(p1, p2):
+    if random.random() < CROSSOVER_RATE and len(p1) > 1:
+        pt = random.randint(1, len(p1) - 1)
+        return p1[:pt] + p2[pt:], p2[:pt] + p1[pt:]
+    return p1, p2
+
+def mutate(ind):
+    for i in range(len(ind)):
+        if random.random() < MUTATION_RATE:
+            row = shiftable.iloc[i]
+            ind[i] = random.randint(row["Start_Window"], row["End_Window"])
+    return ind
+
+# ==========================================================
+# 6. Run Optimization
+# ==========================================================
+if st.button("Run Optimization"):
+
+    population = [create_individual() for _ in range(POP_SIZE)]
+    progress = st.progress(0)
+
+    for g in range(GENERATIONS):
+        new_pop = []
+        for _ in range(POP_SIZE // 2):
+            p1, p2 = selection(population), selection(population)
+            c1, c2 = crossover(p1, p2)
+            new_pop.extend([mutate(c1), mutate(c2)])
+        population = new_pop
+        progress.progress((g + 1) / GENERATIONS)
+
+    st.session_state.best_solution = min(population, key=fitness)
+
+# ==========================================================
+# 7. Results & Visualization
+# ==========================================================
+if st.session_state.best_solution is not None:
+
+    st.subheader("Optimized Appliance Schedule")
+
+    rows = []
+
+    for _, r in non_shiftable.iterrows():
+        rows.append({
+            "Appliance": r["Appliance"],
+            "Type": "Non-Shiftable",
+            "Preferred": r["Preferred_Time"],
+            "Scheduled": r["Preferred_Time"],
+            "Duration": r["Duration"],
+            "Power (kW)": r["Avg_kWh"]
+        })
+
+    for i, start in enumerate(st.session_state.best_solution):
+        r = shiftable.iloc[i]
+        rows.append({
+            "Appliance": r["Appliance"],
+            "Type": "Shiftable",
+            "Preferred": r["Preferred_Time"],
+            "Scheduled": start,
+            "Duration": r["Duration"],
+            "Power (kW)": r["Avg_kWh"]
+        })
+
+    st.dataframe(pd.DataFrame(rows))
+
+    # ------------------------------------------------------
+    # Cost Metrics
+    # ------------------------------------------------------
+    baseline_solution = [r["Preferred_Time"] for _, r in shiftable.iterrows()]
+    baseline_cost = calculate_total_cost(baseline_solution)
+    optimized_cost = calculate_total_cost(st.session_state.best_solution)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Baseline Cost (RM)", f"{baseline_cost:.2f}")
+    c2.metric("Optimized Cost (RM)", f"{optimized_cost:.2f}")
+    c3.metric("Savings (RM)", f"{baseline_cost - optimized_cost:.2f}")
+
+    # ------------------------------------------------------
+    # Hourly Power Consumption Plot (Constraint Validation)
+    # ------------------------------------------------------
+    st.subheader("Hourly Power Consumption (kW)")
+
+    hourly_power = [0.0] * 24
+
+    for _, row in non_shiftable.iterrows():
+        for h in range(row["Preferred_Time"], row["Preferred_Time"] + row["Duration"]):
+            hourly_power[h % 24] += row["Avg_kWh"]
+
+    for i, start in enumerate(st.session_state.best_solution):
+        row = shiftable.iloc[i]
+        for h in range(start, start + row["Duration"]):
+            hourly_power[h % 24] += row["Avg_kWh"]
+
+    fig, ax = plt.subplots()
+    ax.plot(range(24), hourly_power, marker="o", label="Total Power (kW)")
+    ax.axhline(MAX_POWER, linestyle="--", label="5.0 kW Limit")
+
+    ax.set_xlabel("Hour of Day")
+    ax.set_ylabel("Power (kW)")
+    ax.set_xticks(range(24))
+    ax.legend()
+    ax.grid(True)
+
+    st.pyplot(fig)

@@ -205,13 +205,35 @@ if st.button("Run Optimization"):
     c2.metric("Optimized Cost (RM)", f"{optimized_cost:.2f}")
     c3.metric("Savings (RM)", f"{baseline_cost - optimized_cost:.2f}")
 
-    # ------------------------------------------------------
-    # 9. Convergence Plot
-    # ------------------------------------------------------
-    st.subheader("GA Convergence Curve")
+# ------------------------------------------------------
+# 9. Hourly Power Consumption Plot (Constraint Validation)
+# ------------------------------------------------------
+st.subheader("Hourly Power Consumption (kW)")
 
-    fig, ax = plt.subplots()
-    ax.plot(best_history)
-    ax.set_xlabel("Generation")
-    ax.set_ylabel("Fitness Value")
-    st.pyplot(fig)
+# Calculate hourly power for optimized schedule
+hourly_power = [0.0] * 24
+
+# Non-shiftable appliances
+for _, row in non_shiftable.iterrows():
+    for h in range(row["Preferred_Time"], row["Preferred_Time"] + row["Duration"]):
+        hourly_power[h % 24] += row["Avg_kWh"]
+
+# Shiftable appliances (optimized)
+for i, start in enumerate(best_solution):
+    row = shiftable.iloc[i]
+    for h in range(start, start + row["Duration"]):
+        hourly_power[h % 24] += row["Avg_kWh"]
+
+# Plot
+fig, ax = plt.subplots()
+ax.plot(range(24), hourly_power, marker='o', label="Total Power (kW)")
+ax.axhline(MAX_POWER, linestyle="--", label="5.0 kW Limit")
+
+ax.set_xlabel("Hour of Day")
+ax.set_ylabel("Power Consumption (kW)")
+ax.set_xticks(range(24))
+ax.legend()
+ax.grid(True)
+
+st.pyplot(fig)
+

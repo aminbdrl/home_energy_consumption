@@ -12,7 +12,7 @@ st.title("⚡ Smart Home Energy Scheduling Optimization")
 
 st.markdown("""
 ### ✅ Project Objectives & Constraints
-* **Objective 1 (Cost):** Minimize RM using Malaysia ToU Tariff (Peak: 08:00-22:00 @ RM0.50).
+* **Objective 1 (Cost):** Minimize RM using Daily Malaysia ToU Tariff (Peak: 08:00-22:00 @ RM0.50).
 * **Objective 2 (Discomfort):** Minimize the time shift from user preferred hours.
 * **Constraint 1 (Fixed):** Fridge, TV, Lights, etc., stay at original times.
 * **Constraint 2 (Power):** **CRUCIAL - Total power must not exceed 5.0 kW at any hour.**
@@ -52,7 +52,7 @@ def get_tariff(hour):
     return TARIFF_PEAK if 8 <= h < 22 else TARIFF_OFFPEAK
 
 # ----------------------------------------------------------
-# 3. Fitness Function (The Engine)
+# 3. Fitness Function
 # ----------------------------------------------------------
 def fitness(individual):
     total_cost = 0
@@ -75,10 +75,9 @@ def fitness(individual):
             hourly_power[hour_idx] += row['Power_kW']
             total_cost += row['Power_kW'] * get_tariff(hour_idx)
 
-    # ENFORCE 5.0 kW RULE (Heavy Penalty for Violations)
+    # ENFORCE 5.0 kW RULE
     for p in hourly_power:
         if p > MAX_POWER_LIMIT:
-            # Using a squared multiplier to make "illegal" schedules extremely unfit
             peak_penalty += (p - MAX_POWER_LIMIT) * 10000 
 
     return total_cost + (alpha * total_discomfort) + peak_penalty
@@ -87,7 +86,6 @@ def fitness(individual):
 # 4. Genetic Algorithm Execution
 # ----------------------------------------------------------
 def solve():
-    # Initial Population
     population = [[random.randint(0, 23) for _ in range(len(shiftable_apps))] for _ in range(pop_size)]
     best_history = []
     
@@ -96,15 +94,12 @@ def solve():
         population = sorted(population, key=fitness)
         best_history.append(fitness(population[0]))
         
-        # Elitism & Selection
         new_gen = population[:10] 
         while len(new_gen) < pop_size:
             p1 = min(random.sample(population, 5), key=fitness)
             p2 = min(random.sample(population, 5), key=fitness)
-            # One-point Crossover
             pt = random.randint(1, len(p1)-1) if len(p1) > 1 else 0
             child = p1[:pt] + p2[pt:]
-            # Mutation
             if random.random() < 0.15:
                 child[random.randint(0, len(child)-1)] = random.randint(0, 23)
             new_gen.append(child)
@@ -114,12 +109,12 @@ def solve():
     return population[0], best_history
 
 # ----------------------------------------------------------
-# 5. Output and Monthly Cost Reporting
+# 5. Output and Reporting
 # ----------------------------------------------------------
 if st.button("🚀 Calculate Optimized Schedule"):
     best_ind, hist = solve()
     
-    # Calculate Results
+    # Calculate Final Load
     final_load = [0.0] * 24
     for _, row in fixed_apps.iterrows():
         for h in range(row['Preferred'], row['Preferred'] + row['Duration']):
@@ -129,22 +124,22 @@ if st.button("🚀 Calculate Optimized Schedule"):
         for h in range(start, start + row['Duration']):
             final_load[h % 24] += row['Power_kW']
 
-    # Cost Analysis
+    # Cost Analysis (Daily)
     daily_optimized = sum(p * get_tariff(h) for h, p in enumerate(final_load))
     
-    # Baseline (original preferred times)
+    # Baseline
     baseline_load = [0.0] * 24
     for _, row in df.iterrows():
         for h in range(row['Preferred'], row['Preferred'] + row['Duration']):
             baseline_load[h % 24] += row['Power_kW']
     daily_baseline = sum(p * get_tariff(h) for h, p in enumerate(baseline_load))
 
-    # Metrics
-    st.subheader("Financial Impact (Monthly - 30 Days)")
+    # Metrics (Changed to Daily)
+    st.subheader("Financial Impact (Daily)")
     c1, c2, c3 = st.columns(3)
-    c1.metric("Baseline Cost", f"RM {daily_baseline*30:.2f}")
-    c2.metric("Optimized Cost", f"RM {daily_optimized*30:.2f}")
-    c3.metric("Monthly Savings", f"RM {(daily_baseline-daily_optimized)*30:.2f}")
+    c1.metric("Baseline Cost", f"RM {daily_baseline:.2f}")
+    c2.metric("Optimized Cost", f"RM {daily_optimized:.2f}")
+    c3.metric("Daily Savings", f"RM {daily_baseline - daily_optimized:.2f}")
 
     # Power Chart
     st.write("**24-Hour Power Load Profile**")
@@ -157,20 +152,30 @@ if st.button("🚀 Calculate Optimized Schedule"):
     ax.legend()
     st.pyplot(fig)
 
-    # Schedule Table with Duration & End Time
+    # Schedule Table (Added Average Power kW)
     st.subheader("Final Optimized Schedule Table")
     final_res = []
+    
+    # Add Non-Shiftable Appliances
     for _, r in fixed_apps.iterrows():
         final_res.append({
-            "Appliance": r['Appliance'], "Type": "Non-Shiftable", 
-            "Start Time": f"{r['Preferred']}:00", "Duration (h)": r['Duration'],
+            "Appliance": r['Appliance'], 
+            "Type": "Non-Shiftable", 
+            "Average Power (kW)": r['Power_kW'],
+            "Start Time": f"{r['Preferred']}:00", 
+            "Duration (h)": r['Duration'],
             "End Time": f"{(r['Preferred'] + r['Duration'])%24}:00"
         })
+        
+    # Add Shifted Appliances
     for i, start in enumerate(best_ind):
         row = shiftable_apps.iloc[i]
         final_res.append({
-            "Appliance": row['Appliance'], "Type": "Shiftable", 
-            "Start Time": f"{start}:00", "Duration (h)": row['Duration'],
+            "Appliance": row['Appliance'], 
+            "Type": "Shiftable", 
+            "Average Power (kW)": row['Power_kW'],
+            "Start Time": f"{start}:00", 
+            "Duration (h)": row['Duration'],
             "End Time": f"{(start + row['Duration'])%24}:00"
         })
     

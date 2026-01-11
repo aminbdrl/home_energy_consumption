@@ -1,74 +1,170 @@
+# ==========================================================
+# Smart Home Energy Scheduling using Genetic Algorithm
+# Objectives:
+# 1. Minimize Electricity Cost (RM) - Malaysia ToU
+# 2. Minimize User Discomfort (Waiting Time)
+# Constraints:
+# - Non-shiftable appliances remain fixed
+# - Shiftable appliances scheduled within time window
+# ==========================================================
+
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 import random
+import matplotlib.pyplot as plt
 
-# Load dataset
+# ----------------------------------------------------------
+# 1. Load Dataset
+# ----------------------------------------------------------
+st.title("Smart Home Energy Scheduling using Genetic Algorithm")
+
 @st.cache_data
 def load_data():
     return pd.read_csv("universal_tasks.csv")
 
-data = load_data()
+df = load_data()
+st.subheader("Appliance Dataset")
+st.dataframe(df)
 
-st.title("Smart Home Energy Optimization using Genetic Algorithm")
+# Separate appliances
+shiftable = df[df["Shiftable"] == 1].reset_index(drop=True)
+non_shiftable = df[df["Shiftable"] == 0].reset_index(drop=True)
 
-# Sidebar parameters
-st.sidebar.header("GA Parameters")
-POP_SIZE = st.sidebar.slider("Population Size", 10, 200, 50)
-GENS = st.sidebar.slider("Generations", 10, 300, 100)
-MUT_RATE = st.sidebar.slider("Mutation Rate", 0.01, 0.5, 0.1)
+# ----------------------------------------------------------
+# 2. Malaysia Time-of-Use Tariff
+# ----------------------------------------------------------
+TARIFF_PEAK = 0.50      # RM/kWh
+TARIFF_OFFPEAK = 0.30  # RM/kWh
 
-ENERGY = data.iloc[:, -1].values
-GENE_LENGTH = len(ENERGY)
+def get_tariff(hour):
+    if 8 <= hour < 22:
+        return TARIFF_PEAK
+    return TARIFF_OFFPEAK
 
-# GA functions
-def init_population():
-    return [np.random.randint(0, 2, GENE_LENGTH) for _ in range(POP_SIZE)]
+# ----------------------------------------------------------
+# 3. Fixed Cost (Non-shiftable Appliances)
+# ----------------------------------------------------------
+fixed_cost = 0
+for _, row in non_shiftable.iterrows():
+    tariff = get_tariff(row["Start_Window"])
+    fixed_cost += row["Avg_kWh"] * row["Duration"] * tariff
 
-def fitness(ind):
-    energy_used = np.sum(ind * ENERGY)
-    penalty = max(0, 5 - np.sum(ind)) * 100
-    return energy_used + penalty
+# ----------------------------------------------------------
+# 4. GA Parameters (Streamlit Controls)
+# ----------------------------------------------------------
+st.sidebar.header("Genetic Algorithm Parameters")
 
-def selection(pop):
-    return min(random.sample(pop, 3), key=fitness)
+POP_SIZE = st.sidebar.slider("Population Size", 10, 100, 30)
+GENERATIONS = st.sidebar.slider("Generations", 20, 300, 100)
+CROSSOVER_RATE = st.sidebar.slider("Crossover Rate", 0.1, 0.95, 0.8)
+MUTATION_RATE = st.sidebar.slider("Mutation Rate", 0.01, 0.5, 0.1)
+ALPHA = st.sidebar.slider("Discomfort Weight (α)", 0.1, 2.0, 0.5)
 
-def crossover(p1, p2):
-    point = random.randint(1, GENE_LENGTH - 1)
-    return np.concatenate([p1[:point], p2[point:]])
+# ----------------------------------------------------------
+# 5. Genetic Algorithm Functions
+# ----------------------------------------------------------
+def create_individual():
+    """Create a chromosome of start times for shiftable appliances."""
+    individual = []
+    for _, row in shiftable.iterrows():
+        individual.append(random.randint(row["Start_Window"], row["End_Window"]))
+    return individual
 
-def mutation(ind):
-    for i in range(GENE_LENGTH):
-        if random.random() < MUT_RATE:
-            ind[i] = 1 - ind[i]
-    return ind
+def fitness(individual):
+    """Fitness = Cost + α * Discomfort + Penalty"""
+    total_cost = fixed_cost
+    discomfort = 0
+    penalty = 0
 
-# Run GA
+    for i, start_time in enumerate(individual):
+        row = shiftable.iloc[i]
+
+        # Time window constraint
+        if not (row["Start_Window"] <= start_time <= row["End_Window"]):
+            penalty += 100
+
+        tariff = get_tariff(start_time)
+        total_cost += row["Avg_kWh"] * row["Duration"] * tariff
+        discomfort += abs(start_time - row["Start_Window"])
+
+    return total_cost + ALPHA * discomfort + penalty
+
+def selection(population):
+    """Tournament selection"""
+    contenders = random.sample(population, 3)
+    return min(contenders, key=fitness)
+
+def crossover(parent1, parent2):
+    """Single-point crossover"""
+    if random.random() < CROSSOVER_RATE:
+        point = random.randint(1, len(parent1) - 1)
+        return (
+            parent1[:point] + parent2[point:],
+            parent2[:point] + parent1[point:]
+        )
+    return parent1, parent2
+
+def mutate(individual):
+    """Random mutation within allowed window"""
+    for i in range(len(individual)):
+        if random.random() < MUTATION_RATE:
+            row = shiftable.iloc[i]
+            individual[i] = random.randint(row["Start_Window"], row["End_Window"])
+    return individual
+
+# ----------------------------------------------------------
+# 6. Run Genetic Algorithm
+# ----------------------------------------------------------
 if st.button("Run Optimization"):
-    population = init_population()
-    best_fitness = []
-    
-    for _ in range(GENS):
-        new_pop = []
-        for _ in range(POP_SIZE):
+
+    population = [create_individual() for _ in range(POP_SIZE)]
+    best_fitness_history = []
+
+    for _ in range(GENERATIONS):
+        new_population = []
+
+        for _ in range(POP_SIZE // 2):
             p1 = selection(population)
             p2 = selection(population)
-            child = crossover(p1, p2)
-            child = mutation(child)
-            new_pop.append(child)
-        population = new_pop
-        best = min(population, key=fitness)
-        best_fitness.append(fitness(best))
-    
-    st.success("Optimization Complete")
+            c1, c2 = crossover(p1, p2)
+            new_population.append(mutate(c1))
+            new_population.append(mutate(c2))
 
-    # Plot convergence
+        population = new_population
+        best = min(population, key=fitness)
+        best_fitness_history.append(fitness(best))
+
+    best_solution = min(population, key=fitness)
+    best_value = fitness(best_solution)
+
+    # ----------------------------------------------------------
+    # 7. Display Results
+    # ----------------------------------------------------------
+    st.subheader("Optimized Appliance Schedule")
+
+    result = []
+    for i, start in enumerate(best_solution):
+        result.append({
+            "Appliance": shiftable.iloc[i]["Appliance"],
+            "Scheduled Start Time (Hour)": start
+        })
+
+    st.dataframe(pd.DataFrame(result))
+
+    st.metric("Total Optimized Cost (RM)", f"{best_value:.2f}")
+
+    # ----------------------------------------------------------
+    # 8. Convergence Plot
+    # ----------------------------------------------------------
+    st.subheader("GA Convergence Curve")
     fig, ax = plt.subplots()
-    ax.plot(best_fitness)
-    ax.set_title("GA Convergence Curve")
+    ax.plot(best_fitness_history)
     ax.set_xlabel("Generation")
-    ax.set_ylabel("Fitness")
+    ax.set_ylabel("Fitness Value")
+    ax.set_title("Fitness Convergence")
     st.pyplot(fig)
 
-    st.write("Best Energy Consumption:", min(best_fitness))
+# ----------------------------------------------------------
+# End of Application
+# ----------------------------------------------------------

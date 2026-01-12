@@ -66,9 +66,13 @@ else:
 
     def run_ga(p_limit, g_size, p_count):
         population = [np.random.randint(0, 24, size=len(shiftable_apps)).tolist() for _ in range(p_count)]
-        for _ in range(g_size):
+        convergence_history = []  # NEW: Tracking convergence rate
+        
+        for gen in range(g_size):
             fitness_scores = [calculate_fitness(ind, p_limit, alpha) for ind in population]
             best_idx = np.argmin(fitness_scores)
+            convergence_history.append(fitness_scores[best_idx])  # Record best fitness
+            
             new_pop = [population[best_idx]]
             while len(new_pop) < p_count:
                 p1 = population[np.argmin([fitness_scores[i] for i in random.sample(range(p_count), 3)])]
@@ -79,16 +83,17 @@ else:
                     child[random.randint(0, len(child)-1)] = random.randint(0, 23)
                 new_pop.append(child)
             population = new_pop
-        return population[0]
+        return population[0], convergence_history
 
     # ==========================================================
     # 5. Execution & Results
     # ==========================================================
     if st.button("🚀 Run Full Optimization"):
         with st.spinner("Finding optimal schedule..."):
-            best_schedule = run_ga(MAX_POWER_LIMIT, generations, pop_size)
+            best_schedule, convergence_data = run_ga(MAX_POWER_LIMIT, generations, pop_size)
 
-        # Final Load Calculations
+        # --- RESULTS SUMMARY ---
+        st.subheader("📊 Optimization Summary")
         final_load = np.zeros(24)
         for _, r in fixed_apps.iterrows():
             final_load[np.arange(r['Preferred'], r['Preferred'] + r['Duration'], dtype=int) % 24] += r['Power_kW']
@@ -96,16 +101,16 @@ else:
             r = shiftable_apps.iloc[i]
             final_load[np.arange(start, start + r['Duration'], dtype=int) % 24] += r['Power_kW']
 
-        # --- RESULTS SUMMARY (METRICS) ---
-        st.subheader("📊 Optimization Summary")
         col_m1, col_m2 = st.columns(2)
-        daily_cost = np.sum(final_load * tariff_array)
-        peak_pwr = np.max(final_load)
-        
-        col_m1.metric("Optimized Daily Cost", f"RM {daily_cost:.2f}")
-        col_m2.metric("Peak Power Recorded", f"{peak_pwr:.2f} kW")
+        col_m1.metric("Optimized Daily Cost", f"RM {np.sum(final_load * tariff_array):.2f}")
+        col_m2.metric("Peak Power Recorded", f"{np.max(final_load):.2f} kW")
 
-        # Load Profile Plot
+        # --- CONVERGENCE RATE (GA) ---
+        st.subheader("📈 Convergence Rate (Algorithm Learning Curve)")
+        st.markdown("This chart shows the GA reducing total cost and discomfort over generations.")
+        st.line_chart(convergence_data)
+
+        # --- LOAD PROFILE ---
         st.subheader("24-Hour Power Load Profile")
         fig, ax1 = plt.subplots(figsize=(10, 4))
         ax1.bar(range(24), final_load, color='skyblue', label="Load (kW)")
@@ -118,42 +123,27 @@ else:
         ax2.set_ylabel("RM/kWh")
         st.pyplot(fig)
 
-        # --- OPTIMIZATION TABLE ---
+        # --- SCHEDULE TABLE ---
         st.divider()
         st.subheader("📋 Recommended Appliance Schedule")
         schedule_data = []
         for _, r in fixed_apps.iterrows():
-            schedule_data.append({
-                "Appliance": r['Appliance'],
-                "Type": "Fixed",
-                "Original Start": f"{int(r['Preferred'])}:00",
-                "Optimized Start": f"{int(r['Preferred'])}:00",
-                "Shift Status": "No Change",
-                "Power (kW)": r['Power_kW']
-            })
+            schedule_data.append({"Appliance": r['Appliance'], "Type": "Fixed", "Original Start": f"{int(r['Preferred'])}:00", "Optimized Start": f"{int(r['Preferred'])}:00", "Shift Status": "No Change"})
         for i, start in enumerate(best_schedule):
             r = shiftable_apps.iloc[i]
-            diff = start - r['Preferred']
-            status = "Later" if diff > 0 else "Earlier" if diff < 0 else "No Change"
-            schedule_data.append({
-                "Appliance": r['Appliance'],
-                "Type": "Shiftable",
-                "Original Start": f"{int(r['Preferred'])}:00",
-                "Optimized Start": f"{int(start)}:00",
-                "Shift Status": f"{status} ({abs(int(diff))}h)" if status != "No Change" else "No Change",
-                "Power (kW)": r['Power_kW']
-            })
+            diff = int(start - r['Preferred'])
+            status = f"Later ({abs(diff)}h)" if diff > 0 else f"Earlier ({abs(diff)}h)" if diff < 0 else "No Change"
+            schedule_data.append({"Appliance": r['Appliance'], "Type": "Shiftable", "Original Start": f"{int(r['Preferred'])}:00", "Optimized Start": f"{int(start)}:00", "Shift Status": status})
         st.table(pd.DataFrame(schedule_data))
 
-        # --- FAST SENSITIVITY ANALYSIS ---
+        # --- CAPACITY SENSITIVITY ---
         st.divider()
         st.subheader("🔍 Capacity Sensitivity Analysis")
         test_limits = [3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
         results = []
         with st.spinner("Analyzing capacity trade-offs..."):
             for limit in test_limits:
-                # Lite GA for sensitivity speed
-                s_best = run_ga(limit, 50, 50) 
+                s_best, _ = run_ga(limit, 50, 50) 
                 s_load = np.zeros(24)
                 for _, r in fixed_apps.iterrows():
                     s_load[np.arange(r['Preferred'], r['Preferred'] + r['Duration'], dtype=int) % 24] += r['Power_kW']
@@ -161,6 +151,4 @@ else:
                     r = shiftable_apps.iloc[i]
                     s_load[np.arange(start, start + r['Duration'], dtype=int) % 24] += r['Power_kW']
                 results.append({"Limit (kW)": limit, "Daily Cost (RM)": np.sum(s_load * tariff_array)})
-        
         st.line_chart(pd.DataFrame(results).set_index("Limit (kW)"))
-        st.dataframe(pd.DataFrame(results))

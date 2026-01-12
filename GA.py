@@ -10,13 +10,7 @@ import matplotlib.pyplot as plt
 st.set_page_config(page_title="Smart Home Energy GA", layout="wide")
 st.title("⚡ Smart Home Energy Scheduling Optimization")
 
-st.sidebar.markdown("""
-## 📊 Rubric Compliance
-- **Algorithm Exploration:** Implementation with elitism and tournament selection.
-- **Performance Analysis:** Cost savings and convergence tracking.
-- **Extended Analysis:** Multi-objective trade-offs and sensitivity testing.
-- **Streamlit Integration:** Interactive charts and dual-axis plots.
-""")
+st.sidebar.markdown
 
 # ==========================================================
 # 2. Data Loading

@@ -34,7 +34,7 @@ else:
     fixed_apps = df[~df['Shiftable']].reset_index(drop=True)
 
     # ==========================================================
-    # 3. Parameters & Tariff
+    # 3. Sidebar Parameters
     # ==========================================================
     st.sidebar.header("Optimization Settings")
     pop_size = st.sidebar.slider("Population Size", 30, 200, 100)
@@ -44,42 +44,31 @@ else:
     MAX_POWER_LIMIT = 5.0  
     TARIFF_PEAK = 0.50     
     TARIFF_OFFPEAK = 0.30  
-
     tariff_array = np.array([TARIFF_PEAK if 8 <= h < 22 else TARIFF_OFFPEAK for h in range(24)])
 
     # ==========================================================
-    # 4. GA Logic (Optimized for Speed)
+    # 4. GA Engine
     # ==========================================================
     def calculate_fitness(individual, p_limit, current_alpha):
         hourly_power = np.zeros(24)
         total_discomfort = 0
-
-        # Non-shiftable load
         for _, r in fixed_apps.iterrows():
             hours = np.arange(r['Preferred'], r['Preferred'] + r['Duration']) % 24
             hourly_power[hours.astype(int)] += r['Power_kW']
-
-        # Shiftable load
         for i, start in enumerate(individual):
             r = shiftable_apps.iloc[i]
             total_discomfort += abs(start - r['Preferred'])
             hours = np.arange(start, start + r['Duration']) % 24
             hourly_power[hours.astype(int)] += r['Power_kW']
-
         cost = np.sum(hourly_power * tariff_array)
         peak_penalty = np.sum(np.clip(hourly_power - p_limit, 0, None)**2) * 1000 
-
         return cost + (current_alpha * total_discomfort) + peak_penalty
 
     def run_ga(p_limit, g_size, p_count):
         population = [np.random.randint(0, 24, size=len(shiftable_apps)).tolist() for _ in range(p_count)]
-        best_history = []
-        
         for _ in range(g_size):
             fitness_scores = [calculate_fitness(ind, p_limit, alpha) for ind in population]
             best_idx = np.argmin(fitness_scores)
-            best_history.append(fitness_scores[best_idx])
-            
             new_pop = [population[best_idx]]
             while len(new_pop) < p_count:
                 p1 = population[np.argmin([fitness_scores[i] for i in random.sample(range(p_count), 3)])]
@@ -90,17 +79,16 @@ else:
                     child[random.randint(0, len(child)-1)] = random.randint(0, 23)
                 new_pop.append(child)
             population = new_pop
-        return population[0], best_history
+        return population[0]
 
     # ==========================================================
-    # 5. Execution & Automatic Sensitivity Analysis
+    # 5. Execution & Results
     # ==========================================================
     if st.button("🚀 Run Full Optimization"):
-        # Run Main GA
         with st.spinner("Finding optimal schedule..."):
-            best_schedule, history = run_ga(MAX_POWER_LIMIT, generations, pop_size)
+            best_schedule = run_ga(MAX_POWER_LIMIT, generations, pop_size)
 
-        # Show Results Metrics
+        # Calculate Loads
         final_load = np.zeros(24)
         for _, r in fixed_apps.iterrows():
             final_load[np.arange(r['Preferred'], r['Preferred'] + r['Duration'], dtype=int) % 24] += r['Power_kW']
@@ -108,13 +96,8 @@ else:
             r = shiftable_apps.iloc[i]
             final_load[np.arange(start, start + r['Duration'], dtype=int) % 24] += r['Power_kW']
 
-        st.subheader("Results Summary")
-        col1, col2 = st.columns(2)
-        col1.metric("Optimized Daily Cost", f"RM {np.sum(final_load * tariff_array):.2f}")
-        col2.metric("Peak Power Recorded", f"{np.max(final_load):.2f} kW")
-
-        # Load Profile Plot
-        
+        # Charts
+        st.subheader("📊 Load Profile vs Tariff")
         fig, ax1 = plt.subplots(figsize=(10, 4))
         ax1.bar(range(24), final_load, color='skyblue', label="Load (kW)")
         ax1.axhline(MAX_POWER_LIMIT, color='red', linestyle='--', label="Limit")
@@ -124,19 +107,47 @@ else:
         ax2.set_ylabel("RM/kWh")
         st.pyplot(fig)
 
-        # --- AUTOMATIC SENSITIVITY ANALYSIS (FASTER) ---
+        # --- OPTIMIZATION TABLE ---
+        st.divider()
+        st.subheader("📋 Recommended Appliance Schedule")
+        
+        schedule_data = []
+        # Add Non-Shiftable
+        for _, r in fixed_apps.iterrows():
+            schedule_data.append({
+                "Appliance": r['Appliance'],
+                "Type": "Fixed",
+                "Original Start": f"{int(r['Preferred'])}:00",
+                "Optimized Start": f"{int(r['Preferred'])}:00",
+                "Shift Status": "No Change",
+                "Power (kW)": r['Power_kW']
+            })
+        
+        # Add Shiftable
+        for i, start in enumerate(best_schedule):
+            r = shiftable_apps.iloc[i]
+            diff = start - r['Preferred']
+            status = "Later" if diff > 0 else "Earlier" if diff < 0 else "No Change"
+            
+            schedule_data.append({
+                "Appliance": r['Appliance'],
+                "Type": "Shiftable",
+                "Original Start": f"{int(r['Preferred'])}:00",
+                "Optimized Start": f"{int(start)}:00",
+                "Shift Status": f"{status} ({abs(int(diff))}h)",
+                "Power (kW)": r['Power_kW']
+            })
+        
+        st.table(pd.DataFrame(schedule_data))
+
+        # --- AUTOMATIC SENSITIVITY ---
         st.divider()
         st.subheader("🔍 Capacity Sensitivity Analysis")
-        st.write("Automatic comparison of different household power limits:")
-        
         test_limits = [3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
         results = []
-        
-        # Use a "Lite" GA for the sensitivity analysis (50 gen, 50 pop) to ensure speed
         with st.spinner("Analyzing trade-offs..."):
             for limit in test_limits:
-                # Running a smaller version of GA for speed
-                s_best, _ = run_ga(limit, 50, 50) 
+                s_best = run_ga(limit, 50, 50) 
                 s_load = np.zeros(24)
                 for _, r in fixed_apps.iterrows():
                     s_load[np.arange(r['Preferred'], r['Preferred'] + r['Duration'], dtype=int) % 24] += r['Power_kW']
@@ -144,8 +155,5 @@ else:
                     r = shiftable_apps.iloc[i]
                     s_load[np.arange(start, start + r['Duration'], dtype=int) % 24] += r['Power_kW']
                 results.append({"Limit (kW)": limit, "Daily Cost (RM)": np.sum(s_load * tariff_array)})
-
-        sensitivity_df = pd.DataFrame(results)
         
-        st.line_chart(sensitivity_df.set_index("Limit (kW)"))
-        st.dataframe(sensitivity_df)
+        st.line_chart(pd.DataFrame(results).set_index("Limit (kW)"))

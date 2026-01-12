@@ -88,7 +88,7 @@ else:
         with st.spinner("Finding optimal schedule..."):
             best_schedule = run_ga(MAX_POWER_LIMIT, generations, pop_size)
 
-        # Calculate Loads
+        # Final Load Calculations
         final_load = np.zeros(24)
         for _, r in fixed_apps.iterrows():
             final_load[np.arange(r['Preferred'], r['Preferred'] + r['Duration'], dtype=int) % 24] += r['Power_kW']
@@ -96,12 +96,23 @@ else:
             r = shiftable_apps.iloc[i]
             final_load[np.arange(start, start + r['Duration'], dtype=int) % 24] += r['Power_kW']
 
-        # Charts
-        st.subheader("📊 Load Profile vs Tariff")
+        # --- RESULTS SUMMARY (METRICS) ---
+        st.subheader("📊 Optimization Summary")
+        col_m1, col_m2 = st.columns(2)
+        daily_cost = np.sum(final_load * tariff_array)
+        peak_pwr = np.max(final_load)
+        
+        col_m1.metric("Optimized Daily Cost", f"RM {daily_cost:.2f}")
+        col_m2.metric("Peak Power Recorded", f"{peak_pwr:.2f} kW")
+
+        # Load Profile Plot
+        st.subheader("24-Hour Power Load Profile")
         fig, ax1 = plt.subplots(figsize=(10, 4))
         ax1.bar(range(24), final_load, color='skyblue', label="Load (kW)")
         ax1.axhline(MAX_POWER_LIMIT, color='red', linestyle='--', label="Limit")
         ax1.set_ylabel("Power (kW)")
+        ax1.set_xlabel("Hour of Day")
+        ax1.set_xticks(range(24))
         ax2 = ax1.twinx()
         ax2.step(range(24), tariff_array, where='post', color='orange', label="Tariff")
         ax2.set_ylabel("RM/kWh")
@@ -110,9 +121,7 @@ else:
         # --- OPTIMIZATION TABLE ---
         st.divider()
         st.subheader("📋 Recommended Appliance Schedule")
-        
         schedule_data = []
-        # Add Non-Shiftable
         for _, r in fixed_apps.iterrows():
             schedule_data.append({
                 "Appliance": r['Appliance'],
@@ -122,31 +131,28 @@ else:
                 "Shift Status": "No Change",
                 "Power (kW)": r['Power_kW']
             })
-        
-        # Add Shiftable
         for i, start in enumerate(best_schedule):
             r = shiftable_apps.iloc[i]
             diff = start - r['Preferred']
             status = "Later" if diff > 0 else "Earlier" if diff < 0 else "No Change"
-            
             schedule_data.append({
                 "Appliance": r['Appliance'],
                 "Type": "Shiftable",
                 "Original Start": f"{int(r['Preferred'])}:00",
                 "Optimized Start": f"{int(start)}:00",
-                "Shift Status": f"{status} ({abs(int(diff))}h)",
+                "Shift Status": f"{status} ({abs(int(diff))}h)" if status != "No Change" else "No Change",
                 "Power (kW)": r['Power_kW']
             })
-        
         st.table(pd.DataFrame(schedule_data))
 
-        # --- AUTOMATIC SENSITIVITY ---
+        # --- FAST SENSITIVITY ANALYSIS ---
         st.divider()
         st.subheader("🔍 Capacity Sensitivity Analysis")
         test_limits = [3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
         results = []
-        with st.spinner("Analyzing trade-offs..."):
+        with st.spinner("Analyzing capacity trade-offs..."):
             for limit in test_limits:
+                # Lite GA for sensitivity speed
                 s_best = run_ga(limit, 50, 50) 
                 s_load = np.zeros(24)
                 for _, r in fixed_apps.iterrows():
@@ -157,3 +163,4 @@ else:
                 results.append({"Limit (kW)": limit, "Daily Cost (RM)": np.sum(s_load * tariff_array)})
         
         st.line_chart(pd.DataFrame(results).set_index("Limit (kW)"))
+        st.dataframe(pd.DataFrame(results))

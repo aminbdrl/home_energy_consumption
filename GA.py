@@ -95,7 +95,6 @@ else:
         # --- BASELINE CALCULATION ---
         baseline_load = np.zeros(24)
         for _, r in df.iterrows():
-            # Calculate load based on original preferred start hours
             hours = np.arange(r['Preferred'], r['Preferred'] + r['Duration'], dtype=int) % 24
             baseline_load[hours] += r['Power_kW']
         baseline_cost = np.sum(baseline_load * tariff_array)
@@ -137,13 +136,30 @@ else:
         st.divider()
         st.subheader("📋 Recommended Appliance Schedule")
         schedule_data = []
+        # Add Non-Shiftable
         for _, r in fixed_apps.iterrows():
-            schedule_data.append({"Appliance": r['Appliance'], "Type": "Fixed", "Original Start": f"{int(r['Preferred'])}:00", "Optimized Start": f"{int(r['Preferred'])}:00", "Shift Status": "No Change"})
+            schedule_data.append({
+                "Appliance": r['Appliance'], 
+                "Type": "Fixed", 
+                "Duration (h)": r['Duration'],
+                "Original Start": f"{int(r['Preferred'])}:00", 
+                "Optimized Start": f"{int(r['Preferred'])}:00", 
+                "Shift Status": "No Change"
+            })
+        
+        # Add Shiftable
         for i, start in enumerate(best_schedule):
             r = shiftable_apps.iloc[i]
             diff = int(start - r['Preferred'])
             status = f"Later ({abs(diff)}h)" if diff > 0 else f"Earlier ({abs(diff)}h)" if diff < 0 else "No Change"
-            schedule_data.append({"Appliance": r['Appliance'], "Type": "Shiftable", "Original Start": f"{int(r['Preferred'])}:00", "Optimized Start": f"{int(start)}:00", "Shift Status": status})
+            schedule_data.append({
+                "Appliance": r['Appliance'], 
+                "Type": "Shiftable", 
+                "Duration (h)": r['Duration'],
+                "Original Start": f"{int(r['Preferred'])}:00", 
+                "Optimized Start": f"{int(start)}:00", 
+                "Shift Status": status
+            })
         st.table(pd.DataFrame(schedule_data))
 
         # --- CAPACITY SENSITIVITY ---

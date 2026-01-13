@@ -66,12 +66,12 @@ else:
 
     def run_ga(p_limit, g_size, p_count):
         population = [np.random.randint(0, 24, size=len(shiftable_apps)).tolist() for _ in range(p_count)]
-        convergence_history = []  # NEW: Tracking convergence rate
+        convergence_history = [] 
         
         for gen in range(g_size):
             fitness_scores = [calculate_fitness(ind, p_limit, alpha) for ind in population]
             best_idx = np.argmin(fitness_scores)
-            convergence_history.append(fitness_scores[best_idx])  # Record best fitness
+            convergence_history.append(fitness_scores[best_idx]) 
             
             new_pop = [population[best_idx]]
             while len(new_pop) < p_count:
@@ -92,22 +92,32 @@ else:
         with st.spinner("Finding optimal schedule..."):
             best_schedule, convergence_data = run_ga(MAX_POWER_LIMIT, generations, pop_size)
 
-        # --- RESULTS SUMMARY ---
-        st.subheader("📊 Optimization Summary")
+        # --- BASELINE CALCULATION ---
+        baseline_load = np.zeros(24)
+        for _, r in df.iterrows():
+            # Calculate load based on original preferred start hours
+            hours = np.arange(r['Preferred'], r['Preferred'] + r['Duration'], dtype=int) % 24
+            baseline_load[hours] += r['Power_kW']
+        baseline_cost = np.sum(baseline_load * tariff_array)
+
+        # --- OPTIMIZED CALCULATION ---
         final_load = np.zeros(24)
         for _, r in fixed_apps.iterrows():
             final_load[np.arange(r['Preferred'], r['Preferred'] + r['Duration'], dtype=int) % 24] += r['Power_kW']
         for i, start in enumerate(best_schedule):
             r = shiftable_apps.iloc[i]
             final_load[np.arange(start, start + r['Duration'], dtype=int) % 24] += r['Power_kW']
+        optimized_cost = np.sum(final_load * tariff_array)
 
-        col_m1, col_m2 = st.columns(2)
-        col_m1.metric("Optimized Daily Cost", f"RM {np.sum(final_load * tariff_array):.2f}")
-        col_m2.metric("Peak Power Recorded", f"{np.max(final_load):.2f} kW")
+        # --- RESULTS SUMMARY ---
+        st.subheader("📊 Optimization Summary")
+        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m1.metric("Baseline Cost", f"RM {baseline_cost:.2f}")
+        col_m2.metric("Optimized Daily Cost", f"RM {optimized_cost:.2f}", delta=f"-RM {baseline_cost - optimized_cost:.2f}")
+        col_m3.metric("Peak Power Recorded", f"{np.max(final_load):.2f} kW")
 
         # --- CONVERGENCE RATE (GA) ---
         st.subheader("📈 Convergence Rate (Algorithm Learning Curve)")
-        st.markdown("This chart shows the GA reducing total cost and discomfort over generations.")
         st.line_chart(convergence_data)
 
         # --- LOAD PROFILE ---

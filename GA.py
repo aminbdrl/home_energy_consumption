@@ -42,8 +42,8 @@ else:
     alpha = st.sidebar.slider("Discomfort Weight (α)", 0.0, 5.0, 0.5)
 
     MAX_POWER_LIMIT = 5.0  
-    TARIFF_PEAK = 0.50     
-    TARIFF_OFFPEAK = 0.30  
+    TARIFF_PEAK = 0.4592    
+    TARIFF_OFFPEAK = 0.4183  
     tariff_array = np.array([TARIFF_PEAK if 8 <= h < 22 else TARIFF_OFFPEAK for h in range(24)])
 
     # ==========================================================
